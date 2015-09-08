@@ -12,12 +12,17 @@ const p = 0.25
 type Item interface{}
 
 type CompareFn func(Item, Item) int
+type AliveItemFn func(Item) bool
 
 type Skiplist struct {
 	head  *Node
 	tail  *Node
 	level int32
 	stats stats
+
+	// Auto remover
+	isAliveItem AliveItemFn
+	armCmp      CompareFn
 }
 
 func New() *Skiplist {
@@ -33,6 +38,7 @@ func New() *Skiplist {
 		tail: tail,
 	}
 
+	s.SetupAutoRemover(func(Item) bool { return true }, func(Item, Item) int { return 0 })
 	return s
 }
 
@@ -117,6 +123,11 @@ func (s *Skiplist) randomLevel(randFn func() float32) int {
 	}
 
 	return nextLevel
+}
+
+func (s *Skiplist) SetupAutoRemover(afn AliveItemFn, rcmp CompareFn) {
+	s.isAliveItem = afn
+	s.armCmp = rcmp
 }
 
 func (s *Skiplist) helpDelete(level int, prev, curr, next *Node) bool {
@@ -229,6 +240,16 @@ func (s *Skiplist) Delete(itm Item, cmp CompareFn, buf *ActionBuffer) bool {
 
 	delNode := buf.succs[0]
 	if s.softDelete(delNode) {
+		s.findPath(itm, cmp, buf)
+		return true
+	}
+
+	return false
+}
+
+func (s *Skiplist) DeleteNode(n *Node, cmp CompareFn, buf *ActionBuffer) bool {
+	itm := n.itm
+	if s.softDelete(n) {
 		s.findPath(itm, cmp, buf)
 		return true
 	}

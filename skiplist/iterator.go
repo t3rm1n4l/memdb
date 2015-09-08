@@ -6,7 +6,6 @@ type Iterator struct {
 	prev, curr *Node
 	valid      bool
 	buf        *ActionBuffer
-	deleted    bool
 }
 
 func (s *Skiplist) NewIterator(cmp CompareFn,
@@ -45,22 +44,15 @@ func (it *Iterator) Get() Item {
 	return it.curr.itm
 }
 
-func (it *Iterator) Delete() {
-	it.s.softDelete(it.curr)
-	// It will observe that current item is deleted
-	// Run delete helper and move to the next possible item
-	it.Next()
-	it.deleted = true
-}
-
 func (it *Iterator) Next() {
-	if it.deleted {
-		it.deleted = false
-		return
-	}
-
 retry:
 	it.valid = true
+	if !it.s.isAliveItem(it.curr.itm) {
+		it.s.DeleteNode(it.curr, it.s.armCmp, it.buf)
+		it.prev = it.buf.preds[0]
+		it.curr = it.buf.succs[0]
+	}
+
 	next, deleted := it.curr.getNext(0)
 	for deleted {
 		if !it.s.helpDelete(0, it.prev, it.curr, next) {
