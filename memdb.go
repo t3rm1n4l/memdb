@@ -226,6 +226,8 @@ func NewWithConfig(cfg Config) *MemDB {
 		Config:    cfg,
 	}
 
+	m.store.SetupAutoRemover(m.isItemAliveCallback, m.insCmp)
+
 	return m
 
 }
@@ -409,18 +411,21 @@ func (m *MemDB) ItemsCount() int64 {
 }
 
 func (m *MemDB) collectDead(sn uint32) {
-	buf1 := m.snapshots.MakeBuf()
-	buf2 := m.snapshots.MakeBuf()
-	defer m.snapshots.FreeBuf(buf1)
-	defer m.snapshots.FreeBuf(buf2)
-	iter := m.store.NewIterator(m.iterCmp, buf1)
-	iter.SeekFirst()
-	for ; iter.Valid(); iter.Next() {
-		itm := iter.Get().(*Item)
-		if itm.deadSn > 0 && itm.deadSn <= m.getLeastUnrefSn() {
-			m.store.Delete(itm, m.insCmp, buf2)
-		}
+	buf := m.snapshots.MakeBuf()
+	defer m.snapshots.FreeBuf(buf)
+	iter := m.store.NewIterator(m.iterCmp, buf)
+	for iter.SeekFirst(); iter.Valid(); iter.Next() {
+		// Auto remover will cleanup dead items
 	}
+}
+
+func (m *MemDB) isItemAliveCallback(sitm skiplist.Item) bool {
+	itm := sitm.(*Item)
+	if itm.deadSn > 0 && itm.deadSn <= m.getLeastUnrefSn() {
+		return true
+	}
+
+	return false
 }
 
 func (m *MemDB) GC() {
