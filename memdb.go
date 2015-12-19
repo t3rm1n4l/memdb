@@ -60,9 +60,9 @@ func init() {
 	dbInstances = skiplist.New()
 }
 
-func CompareMemDB(this skiplist.Item, that skiplist.Item) int {
-	thisItem := this.(*MemDB)
-	thatItem := that.(*MemDB)
+func CompareMemDB(this unsafe.Pointer, that unsafe.Pointer) int {
+	thisItem := (*MemDB)(this)
+	thatItem := (*MemDB)(this)
 
 	return int(thisItem.id - thatItem.id)
 }
@@ -117,7 +117,8 @@ func (itm *Item) Bytes() []byte {
 	return stringToBytes(itm.data)
 }
 
-func (itm Item) Size() int {
+func ItemSize(p unsafe.Pointer) int {
+	itm := (*Item)(p)
 	return int(unsafe.Sizeof(itm.bornSn)+unsafe.Sizeof(itm.deadSn)+
 		unsafe.Sizeof(itm.data)) + len(itm.data)
 }
@@ -129,10 +130,10 @@ func NewItem(data string) *Item {
 }
 
 func newInsertCompare(keyCmp KeyCompare) skiplist.CompareFn {
-	return func(this skiplist.Item, that skiplist.Item) int {
+	return func(this, that unsafe.Pointer) int {
 		var v int
-		thisItem := this.(*Item)
-		thatItem := that.(*Item)
+		thisItem := (*Item)(this)
+		thatItem := (*Item)(that)
 		if v = keyCmp(thisItem.data, thatItem.data); v == 0 {
 			v = int(thisItem.bornSn) - int(thatItem.bornSn)
 		}
@@ -142,27 +143,17 @@ func newInsertCompare(keyCmp KeyCompare) skiplist.CompareFn {
 }
 
 func newIterCompare(keyCmp KeyCompare) skiplist.CompareFn {
-	return func(this skiplist.Item, that skiplist.Item) int {
-		thisItem := this.(*Item)
-		thatItem := that.(*Item)
+	return func(this, that unsafe.Pointer) int {
+		thisItem := (*Item)(this)
+		thatItem := (*Item)(that)
 		return keyCmp(thisItem.data, thatItem.data)
 	}
 }
 
 func defaultKeyCmp(a string, b string) int {
-	var l int
-
 	this := stringToBytes(a)
 	that := stringToBytes(b)
-	l1 := len(this)
-	l2 := len(that)
-	if l1 < l2 {
-		l = l1
-	} else {
-		l = l2
-	}
-
-	return bytes.Compare(this[:l], that[:l])
+	return bytes.Compare(this, that)
 }
 
 //
@@ -184,7 +175,7 @@ func (w *Writer) Put(x *Item) {
 func (w *Writer) Put2(x *Item) (n *skiplist.Node) {
 	var success bool
 	x.bornSn = w.getCurrSn()
-	n, success = w.store.Insert2(x, w.insCmp, w.buf, w.rand.Float32)
+	n, success = w.store.Insert2(unsafe.Pointer(x), w.insCmp, w.buf, w.rand.Float32)
 	if success {
 		atomic.AddInt64(&w.count, 1)
 	}
@@ -214,7 +205,7 @@ func (w *Writer) DeleteNode(x *skiplist.Node) (success bool) {
 	}()
 
 	sn := w.getCurrSn()
-	gotItem := x.Item().(*Item)
+	gotItem := (*Item)(x.Item())
 	if gotItem.bornSn == sn {
 		success = w.store.DeleteNode(x, w.insCmp, w.buf)
 		return
@@ -236,14 +227,14 @@ func (w *Writer) DeleteNode(x *skiplist.Node) (success bool) {
 func (w *Writer) Get(x *Item) *Item {
 	n := w.GetNode(x)
 	if n != nil {
-		return n.Item().(*Item)
+		return (*Item)(n.Item())
 	}
 	return nil
 }
 
 func (w *Writer) GetNode(x *Item) *skiplist.Node {
 	var curr *skiplist.Node
-	found := w.iter.Seek(x)
+	found := w.iter.Seek(unsafe.Pointer(x))
 	if !found {
 		return nil
 	}
@@ -256,8 +247,8 @@ func (w *Writer) GetNode(x *Item) *skiplist.Node {
 			break
 		}
 		next := w.iter.GetNode()
-		nxtItm := next.Item().(*Item)
-		currItm := curr.Item().(*Item)
+		nxtItm := next.Item()
+		currItm := curr.Item()
 		if w.iterCmp(nxtItm, currItm) != 0 {
 			break
 		}
@@ -265,7 +256,7 @@ func (w *Writer) GetNode(x *Item) *skiplist.Node {
 		curr = next
 	}
 
-	currItm := curr.Item().(*Item)
+	currItm := (*Item)(curr.Item())
 	if currItm.deadSn != 0 {
 		return nil
 	}
@@ -332,25 +323,25 @@ func NewWithConfig(cfg Config) *MemDB {
 		id:          int(atomic.AddInt64(&dbInstancesCount, 1)),
 	}
 
+	m.initSizeFuns()
 	buf := dbInstances.MakeBuf()
 	defer dbInstances.FreeBuf(buf)
-	dbInstances.Insert(m, CompareMemDB, buf)
-
-	if cfg.ignoreItemSize {
-		m.store.IgnoreItemSize()
-	}
+	dbInstances.Insert(unsafe.Pointer(m), CompareMemDB, buf)
 
 	return m
 
 }
 
-func New() *MemDB {
-	return NewWithConfig(DefaultConfig())
+func (m *MemDB) initSizeFuns() {
+	m.snapshots.SetItemSizeFunc(SnapshotSize)
+	m.gcsnapshots.SetItemSizeFunc(SnapshotSize)
+	if !m.ignoreItemSize {
+		m.store.SetItemSizeFunc(ItemSize)
+	}
 }
 
-// Make item interface happy
-func (m *MemDB) Size() int {
-	return 0
+func New() *MemDB {
+	return NewWithConfig(DefaultConfig())
 }
 
 func (m *MemDB) MemoryInUse() int64 {
@@ -365,20 +356,17 @@ func (m *MemDB) Reset() {
 	m.gcchan = make(chan *skiplist.Node, gcchanBufSize)
 	m.currSn = 1
 
+	m.initSizeFuns()
 	buf := dbInstances.MakeBuf()
 	defer dbInstances.FreeBuf(buf)
-	dbInstances.Insert(m, CompareMemDB, buf)
-
-	if m.ignoreItemSize {
-		m.store.IgnoreItemSize()
-	}
+	dbInstances.Insert(unsafe.Pointer(m), CompareMemDB, buf)
 }
 
 func (m *MemDB) Close() {
 	close(m.gcchan)
 	buf := dbInstances.MakeBuf()
 	defer dbInstances.FreeBuf(buf)
-	dbInstances.Delete(m, CompareMemDB, buf)
+	dbInstances.Delete(unsafe.Pointer(m), CompareMemDB, buf)
 }
 
 func (m *MemDB) getCurrSn() uint32 {
@@ -391,7 +379,7 @@ func (m *MemDB) setLeastUnrefSn() {
 	iter := m.snapshots.NewIterator(CompareSnapshot, buf)
 	iter.SeekFirst()
 	if iter.Valid() {
-		snap := iter.Get().(*Snapshot)
+		snap := (*Snapshot)(iter.Get())
 		atomic.StoreUint32(&m.leastUnrefSn, snap.sn-1)
 	}
 }
@@ -427,7 +415,8 @@ type Snapshot struct {
 	gclist *skiplist.Node
 }
 
-func (s Snapshot) Size() int {
+func SnapshotSize(p unsafe.Pointer) int {
+	s := (*Snapshot)(p)
 	return int(unsafe.Sizeof(s.sn) + unsafe.Sizeof(s.refCount) + unsafe.Sizeof(s.db) +
 		unsafe.Sizeof(s.count) + unsafe.Sizeof(s.gclist))
 }
@@ -474,8 +463,8 @@ func (s *Snapshot) Close() {
 		defer s.db.snapshots.FreeBuf(buf)
 
 		// Move from live snapshot list to dead list
-		s.db.snapshots.Delete(s, CompareSnapshot, buf)
-		s.db.gcsnapshots.Insert(s, CompareSnapshot, buf)
+		s.db.snapshots.Delete(unsafe.Pointer(s), CompareSnapshot, buf)
+		s.db.gcsnapshots.Insert(unsafe.Pointer(s), CompareSnapshot, buf)
 		s.db.setLeastUnrefSn()
 		if atomic.CompareAndSwapInt32(&s.db.isGCRunning, 0, 1) {
 			go s.db.GC()
@@ -487,9 +476,9 @@ func (s *Snapshot) NewIterator() *Iterator {
 	return s.db.NewIterator(s)
 }
 
-func CompareSnapshot(this skiplist.Item, that skiplist.Item) int {
-	thisItem := this.(*Snapshot)
-	thatItem := that.(*Snapshot)
+func CompareSnapshot(this, that unsafe.Pointer) int {
+	thisItem := (*Snapshot)(this)
+	thatItem := (*Snapshot)(that)
 
 	return int(thisItem.sn) - int(thatItem.sn)
 }
@@ -499,7 +488,7 @@ func (m *MemDB) NewSnapshot() *Snapshot {
 	defer m.snapshots.FreeBuf(buf)
 
 	snap := &Snapshot{db: m, sn: m.getCurrSn(), refCount: 1, count: m.ItemsCount()}
-	m.snapshots.Insert(snap, CompareSnapshot, buf)
+	m.snapshots.Insert(unsafe.Pointer(snap), CompareSnapshot, buf)
 	atomic.AddUint32(&m.currSn, 1)
 
 	// Stitch all local gclists from all writers to create snapshot gclist
@@ -534,7 +523,7 @@ loop:
 	if !it.iter.Valid() {
 		return
 	}
-	itm := it.iter.Get().(*Item)
+	itm := (*Item)(it.iter.Get())
 	if itm.bornSn > it.snap.sn || (itm.deadSn > 0 && itm.deadSn <= it.snap.sn) {
 		it.iter.Next()
 		goto loop
@@ -547,7 +536,7 @@ func (it *Iterator) SeekFirst() {
 }
 
 func (it *Iterator) Seek(itm *Item) {
-	it.iter.Seek(itm)
+	it.iter.Seek(unsafe.Pointer(itm))
 	it.skipUnwanted()
 }
 
@@ -556,7 +545,7 @@ func (it *Iterator) Valid() bool {
 }
 
 func (it *Iterator) Get() *Item {
-	return it.iter.Get().(*Item)
+	return (*Item)(it.iter.Get())
 }
 
 func (it *Iterator) GetNode() *skiplist.Node {
@@ -609,8 +598,7 @@ func (m *MemDB) collectDead(sn uint32) {
 	iter.SeekFirst()
 	for ; iter.Valid(); iter.Next() {
 		node := iter.GetNode()
-		sn := node.Item().(*Snapshot)
-
+		sn := (*Snapshot)(node.Item())
 		if sn.sn > m.getLeastUnrefSn() {
 			return
 		}
@@ -640,7 +628,7 @@ func (m *MemDB) GetSnapshots() []*Snapshot {
 	iter := m.snapshots.NewIterator(CompareSnapshot, buf)
 	iter.SeekFirst()
 	for ; iter.Valid(); iter.Next() {
-		snaps = append(snaps, iter.Get().(*Snapshot))
+		snaps = append(snaps, (*Snapshot)(iter.Get()))
 	}
 
 	return snaps
@@ -659,7 +647,7 @@ func (m *MemDB) Visitor(snap *Snapshot, callb VisitorCallback, shards int, concu
 	pivots := m.store.GetRangeSplitItems(shards)
 	for _, p := range pivots {
 		iter := m.NewIterator(snap)
-		iter.Seek(p.(*Item))
+		iter.Seek((*Item)(p))
 
 		if iter.Valid() && (len(lastNodes) == 0 || iter.GetNode() != lastNodes[len(lastNodes)-1]) {
 			iters = append(iters, iter)
@@ -783,7 +771,7 @@ func (m *MemDB) LoadFromDisk(dir string, concurr int, callb ItemCallback) (*Snap
 
 	if callb != nil {
 		nodeCallb = func(n *skiplist.Node) {
-			callb(&ItemEntry{itm: n.Item().(*Item), n: n})
+			callb(&ItemEntry{itm: (*Item)(n.Item()), n: n})
 		}
 	}
 
@@ -825,7 +813,7 @@ func (m *MemDB) LoadFromDisk(dir string, concurr int, callb ItemCallback) (*Snap
 					if itm == nil {
 						break loop
 					}
-					segments[shard].Add(itm)
+					segments[shard].Add(unsafe.Pointer(itm))
 				}
 			}
 		}(&wg)
@@ -857,7 +845,7 @@ func MemoryInUse() (sz int64) {
 	defer dbInstances.FreeBuf(buf)
 	iter := dbInstances.NewIterator(CompareMemDB, buf)
 	for iter.SeekFirst(); iter.Valid(); iter.Next() {
-		db := iter.Get().(*MemDB)
+		db := (*MemDB)(iter.Get())
 		sz += db.MemoryInUse()
 	}
 
