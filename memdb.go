@@ -18,7 +18,7 @@ import (
 	"unsafe"
 )
 
-type KeyCompare func([]byte, []byte) int
+type KeyCompare func(string, string) int
 
 type VisitorCallback func(*Item, int) error
 
@@ -77,7 +77,7 @@ func DefaultConfig() Config {
 
 type Item struct {
 	bornSn, deadSn uint32
-	data           []byte
+	data           string
 }
 
 func (itm *Item) Encode(buf []byte, w io.Writer) error {
@@ -86,11 +86,13 @@ func (itm *Item) Encode(buf []byte, w io.Writer) error {
 		return ErrNotEnoughSpace
 	}
 
-	binary.BigEndian.PutUint16(buf[0:2], uint16(len(itm.data)))
+	bs := itm.Bytes()
+	binary.BigEndian.PutUint16(buf[0:2], uint16(len(bs)))
 	if _, err := w.Write(buf[0:2]); err != nil {
 		return err
 	}
-	if _, err := w.Write(itm.data); err != nil {
+
+	if _, err := w.Write(bs); err != nil {
 		return err
 	}
 
@@ -102,14 +104,18 @@ func (itm *Item) Decode(buf []byte, r io.Reader) error {
 		return err
 	}
 	l := binary.BigEndian.Uint16(buf[0:2])
-	itm.data = make([]byte, int(l))
-	_, err := io.ReadFull(r, itm.data)
+	if l > 0 {
+		newbuf := make([]byte, int(l))
+		_, err := io.ReadFull(r, newbuf)
+		itm.data = string(newbuf)
+		return err
+	}
 
-	return err
+	return nil
 }
 
 func (itm *Item) Bytes() []byte {
-	return itm.data
+	return stringToBytes(itm.data)
 }
 
 func (itm Item) Size() int {
@@ -117,7 +123,7 @@ func (itm Item) Size() int {
 		unsafe.Sizeof(itm.data)) + len(itm.data)
 }
 
-func NewItem(data []byte) *Item {
+func NewItem(data string) *Item {
 	return &Item{
 		data: data,
 	}
@@ -144,9 +150,11 @@ func newIterCompare(keyCmp KeyCompare) skiplist.CompareFn {
 	}
 }
 
-func defaultKeyCmp(this []byte, that []byte) int {
+func defaultKeyCmp(a string, b string) int {
 	var l int
 
+	this := stringToBytes(a)
+	that := stringToBytes(b)
 	l1 := len(this)
 	l2 := len(that)
 	if l1 < l2 {

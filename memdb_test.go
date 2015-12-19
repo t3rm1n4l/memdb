@@ -15,16 +15,16 @@ func TestInsert(t *testing.T) {
 	defer db.Close()
 	w := db.NewWriter()
 	for i := 0; i < 2000; i++ {
-		w.Put(NewItem([]byte(fmt.Sprintf("%010d", i))))
+		w.Put(NewItem(fmt.Sprintf("%010d", i)))
 	}
 
 	for i := 1750; i < 2000; i++ {
-		w.Delete(NewItem([]byte(fmt.Sprintf("%010d", i))))
+		w.Delete(NewItem(fmt.Sprintf("%010d", i)))
 	}
 	snap := w.NewSnapshot()
 
 	for i := 2000; i < 5000; i++ {
-		w.Put(NewItem([]byte(fmt.Sprintf("%010d", i))))
+		w.Put(NewItem(fmt.Sprintf("%010d", i)))
 	}
 
 	_ = w.NewSnapshot()
@@ -32,7 +32,7 @@ func TestInsert(t *testing.T) {
 	itr := w.NewIterator(snap)
 	count := 0
 	itr.SeekFirst()
-	itr.Seek(NewItem([]byte(fmt.Sprintf("%010d", 1500))))
+	itr.Seek(NewItem(fmt.Sprintf("%010d", 1500)))
 	for ; itr.Valid(); itr.Next() {
 		expected := fmt.Sprintf("%010d", count+1500)
 		got := string(itr.Get().data)
@@ -64,8 +64,8 @@ func doInsert(db *MemDB, wg *sync.WaitGroup, n int, isRand bool, shouldSnap bool
 		}
 		buf := make([]byte, 8)
 		binary.BigEndian.PutUint64(buf, uint64(val))
-		// w.Put(NewItem([]byte(fmt.Sprintf("%025d", val))))
-		w.Put(NewItem(buf))
+		// w.Put(NewItem(fmt.Sprintf("%025d", val)))
+		w.Put(NewItem(string(buf)))
 	}
 }
 
@@ -98,7 +98,7 @@ func doGet(t *testing.T, db *MemDB, snap *Snapshot, wg *sync.WaitGroup, n int) {
 		val := rnd.Int() % n
 		binary.BigEndian.PutUint64(buf, uint64(val))
 		// itr.Seek(NewItem([]byte(fmt.Sprintf("%025d", val))))
-		itr.Seek(NewItem(buf))
+		itr.Seek(NewItem(string(buf)))
 		if !itr.Valid() {
 			t.Errorf("Expected to find %v", val)
 		}
@@ -193,7 +193,7 @@ func TestDelete(t *testing.T) {
 	defer db.Close()
 	w := db.NewWriter()
 	for i := 0; i < expected; i++ {
-		w.Put(NewItem([]byte(fmt.Sprintf("%010d", i))))
+		w.Put(NewItem(fmt.Sprintf("%010d", i)))
 	}
 
 	snap1 := w.NewSnapshot()
@@ -204,11 +204,11 @@ func TestDelete(t *testing.T) {
 	fmt.Println(db.DumpStats())
 
 	for i := 0; i < expected; i++ {
-		w.Delete(NewItem([]byte(fmt.Sprintf("%010d", i))))
+		w.Delete(NewItem(fmt.Sprintf("%010d", i)))
 	}
 
 	for i := 0; i < expected; i++ {
-		w.Put(NewItem([]byte(fmt.Sprintf("%010d", i))))
+		w.Put(NewItem(fmt.Sprintf("%010d", i)))
 	}
 	snap2 := w.NewSnapshot()
 	snap1.Close()
@@ -229,8 +229,8 @@ func doReplace(wg *sync.WaitGroup, t *testing.T, w *Writer, start, end int) {
 	defer wg.Done()
 
 	for ; start < end; start++ {
-		w.Delete(NewItem([]byte(fmt.Sprintf("%010d", start))))
-		w.Put(NewItem([]byte(fmt.Sprintf("%010d", start))))
+		w.Delete(NewItem(fmt.Sprintf("%010d", start)))
+		w.Put(NewItem(fmt.Sprintf("%010d", start)))
 	}
 }
 
@@ -287,14 +287,14 @@ func TestMemoryInUse(t *testing.T) {
 	}
 	w := db.NewWriter()
 	for i := 0; i < 5000; i++ {
-		w.Put(NewItem([]byte(fmt.Sprintf("%010d", i))))
+		w.Put(NewItem(fmt.Sprintf("%010d", i)))
 	}
 	snap1 := w.NewSnapshot()
 
 	dumpStats()
 
 	for i := 0; i < 5000; i++ {
-		w.Delete(NewItem([]byte(fmt.Sprintf("%010d", i))))
+		w.Delete(NewItem(fmt.Sprintf("%010d", i)))
 	}
 
 	snap1.Close()

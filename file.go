@@ -74,10 +74,7 @@ func (f *rawFileWriter) WriteItem(itm *Item) error {
 }
 
 func (f *rawFileWriter) Close() error {
-	terminator := &Item{
-		data: []byte(nil),
-	}
-
+	terminator := &Item{data: ""}
 	if err := f.WriteItem(terminator); err != nil {
 		return err
 	}
