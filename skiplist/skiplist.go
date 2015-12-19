@@ -64,7 +64,7 @@ func (s *Skiplist) FreeBuf(b *ActionBuffer) {
 }
 
 type Node struct {
-	next   []unsafe.Pointer
+	next   []NodeRef
 	itm    unsafe.Pointer
 	GClink *Node
 }
@@ -86,13 +86,13 @@ func (n *Node) GetLink() *Node {
 }
 
 type NodeRef struct {
-	deleted bool
+	deleted uint64
 	ptr     *Node
 }
 
 func newNode(itm unsafe.Pointer, level int) *Node {
 	n := &Node{
-		next: make([]unsafe.Pointer, level+1),
+		next: make([]NodeRef, level+1),
 	}
 
 	n.itm = itm
@@ -100,30 +100,31 @@ func newNode(itm unsafe.Pointer, level int) *Node {
 }
 
 func (n *Node) setNext(level int, ptr *Node, deleted bool) {
-	n.next[level] = unsafe.Pointer(&NodeRef{ptr: ptr, deleted: deleted})
+	n.next[level].ptr = ptr
 }
 
 func (n *Node) getNext(level int) (*Node, bool) {
-	ref := (*NodeRef)(atomic.LoadPointer(&n.next[level]))
-	if ref != nil {
-		return ref.ptr, ref.deleted
-	}
-
-	return nil, false
+	addr := (*uint64)(unsafe.Pointer(uintptr(unsafe.Pointer(&n.next[level])) + uintptr(7)))
+	v := atomic.LoadUint64(addr)
+	deleted := v&0xff == 0xff
+	ptr := (*Node)(unsafe.Pointer(uintptr(v >> 8)))
+	return ptr, deleted
 }
 
 func (n *Node) dcasNext(level int, prevPtr, newPtr *Node, prevIsdeleted, newIsdeleted bool) bool {
-	var swapped bool
-	addr := &n.next[level]
-	ref := (*NodeRef)(atomic.LoadPointer(addr))
-	if ref != nil {
-		if ref.ptr == prevPtr && ref.deleted == prevIsdeleted {
-			swapped = atomic.CompareAndSwapPointer(addr, unsafe.Pointer(ref),
-				unsafe.Pointer(&NodeRef{ptr: newPtr, deleted: newIsdeleted}))
-		}
+	addr := (*uint64)(unsafe.Pointer(uintptr(unsafe.Pointer(&n.next[level])) + uintptr(7)))
+
+	prevVal := uint64(uintptr(unsafe.Pointer(prevPtr)) << 8)
+	if prevIsdeleted {
+		prevVal |= 0xff
 	}
 
-	return swapped
+	newVal := uint64(uintptr(unsafe.Pointer(newPtr)) << 8)
+	if newIsdeleted {
+		newVal |= 0xff
+	}
+
+	return atomic.CompareAndSwapUint64(addr, prevVal, newVal)
 }
 
 func (s *Skiplist) Size(n *Node) int {
