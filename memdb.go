@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/t3rm1n4l/memdb/mm"
 	"github.com/t3rm1n4l/memdb/skiplist"
 	"io"
 	"io/ioutil"
@@ -294,18 +295,20 @@ func NewWithConfig(cfg Config) *MemDB {
 		id:          int(atomic.AddInt64(&dbInstancesCount, 1)),
 	}
 
+	slCfg := skiplist.DefaultConfig()
+
 	if m.useMemoryMgmt {
-		m.store = skiplist.NewWithMM(
-			skiplist.AllocNodeMM,
-			skiplist.FreeNodeMM,
-			m.newBSDestructor())
+		slCfg.UseMemoryMgmt = true
+		slCfg.Malloc = mm.Malloc
+		slCfg.Free = mm.Free
+		slCfg.BarrierDestructor = m.newBSDestructor()
 
 		m.freechan = make(chan *skiplist.Node, gcchanBufSize)
-	} else {
-		m.store = skiplist.New()
 	}
 
+	m.store = skiplist.NewWithConfig(slCfg)
 	m.initSizeFuns()
+
 	buf := dbInstances.MakeBuf()
 	defer dbInstances.FreeBuf(buf)
 	dbInstances.Insert(unsafe.Pointer(m), CompareMemDB, buf)

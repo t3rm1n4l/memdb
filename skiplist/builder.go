@@ -45,7 +45,7 @@ type Builder struct {
 }
 
 func (b *Builder) SetItemSizeFunc(fn ItemSizeFn) {
-	b.store.itemSize = fn
+	b.store.ItemSize = fn
 }
 
 func (b *Builder) NewSegment() *Segment {
