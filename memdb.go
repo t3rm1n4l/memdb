@@ -25,7 +25,7 @@ var (
 
 type KeyCompare func([]byte, []byte) int
 
-type VisitorCallback func(*Item, int) error
+type VisitorCallback func(*skiplist.Node, int) error
 
 type ItemEntry struct {
 	itm *Item
@@ -727,8 +727,7 @@ func (m *MemDB) Visitor(snap *Snapshot, callb VisitorCallback, shards int, concu
 						break loop
 					}
 
-					itm := (*Item)(itr.GetNode().Item())
-					if err := callb(itm, shard); err != nil {
+					if err := callb(itr.GetNode(), shard); err != nil {
 						errors[shard] = err
 						return
 					}
@@ -786,8 +785,9 @@ func (m *MemDB) StoreToDisk(dir string, snap *Snapshot, concurr int, itmCallback
 		files[shard] = file
 	}
 
-	visitorCallback := func(itm *Item, shard int) error {
+	visitorCallback := func(n *skiplist.Node, shard int) error {
 		w := writers[shard]
+		itm := (*Item)(n.Item())
 		if err := w.WriteItem(itm); err != nil {
 			return err
 		}
@@ -909,4 +909,19 @@ func MemoryInUse() (sz int64) {
 	}
 
 	return
+}
+
+// It is unsafe to call this while any live access happening to the database
+func (m *MemDB) RunDefragmentation() error {
+	visitorCallback := func(n *skiplist.Node, shard int) error {
+		itm := (*Item)(n.Item())
+		newItem := m.copyItem(itm, m.useMemoryMgmt)
+		n.SetItem(unsafe.Pointer(newItem))
+		m.freeItem(itm)
+		return nil
+	}
+
+	// Fake snapshot to iterate latest items
+	snap := &Snapshot{db: m, sn: m.getCurrSn(), refCount: 1}
+	return m.Visitor(snap, visitorCallback, runtime.NumCPU(), runtime.NumCPU())
 }

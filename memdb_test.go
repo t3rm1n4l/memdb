@@ -9,6 +9,7 @@ import "math/rand"
 import "sync"
 import "runtime"
 import "encoding/binary"
+import "github.com/t3rm1n4l/memdb/skiplist"
 
 //import "github.com/t3rm1n4l/memdb/mm"
 
@@ -409,7 +410,8 @@ func TestVisitor(t *testing.T) {
 	var startEndRange [shards][2]uint64
 	var sum int64
 
-	callb := func(itm *Item, shard int) error {
+	callb := func(n *skiplist.Node, shard int) error {
+		itm := (*Item)(n.Item())
 		v := binary.BigEndian.Uint64(itm.Bytes())
 		atomic.AddInt64(&sum, int64(v))
 		atomic.AddInt64(&counts[shard], 1)
@@ -457,7 +459,8 @@ func TestVisitorError(t *testing.T) {
 	snap, _ := db.NewSnapshot()
 
 	errVisitor := fmt.Errorf("visitor failed")
-	callb := func(itm *Item, shard int) error {
+	callb := func(n *skiplist.Node, shard int) error {
+		itm := (*Item)(n.Item())
 		v := binary.BigEndian.Uint64(itm.Bytes())
 		if v == 90000 {
 			return errVisitor

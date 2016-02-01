@@ -22,6 +22,13 @@ func (m *MemDB) newItem(data []byte, useMM bool) (itm *Item) {
 	return itm
 }
 
+func (m *MemDB) copyItem(itm *Item, useMM bool) *Item {
+	newItem := m.allocItem(int(itm.dataLen), useMM)
+	*newItem = *itm
+	copy(newItem.Bytes(), itm.Bytes())
+	return newItem
+}
+
 func (m *MemDB) freeItem(itm *Item) {
 	if m.useMemoryMgmt {
 		m.freeFun(unsafe.Pointer(itm))

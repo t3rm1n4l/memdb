@@ -37,6 +37,10 @@ func (n *Node) Item() unsafe.Pointer {
 	return n.itm
 }
 
+func (n *Node) SetItem(itm unsafe.Pointer) {
+	n.itm = itm
+}
+
 func (n *Node) SetLink(l *Node) {
 	n.GClink = l
 }
