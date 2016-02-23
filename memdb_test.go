@@ -92,8 +92,9 @@ func TestInsertPerf(t *testing.T) {
 	wg.Wait()
 
 	snap, _ := db.NewSnapshot()
-	VerifyCount(snap, n*runtime.GOMAXPROCS(0), t)
+
 	dur := time.Since(t0)
+	VerifyCount(snap, n*runtime.GOMAXPROCS(0), t)
 	fmt.Printf("%d items took %v -> %v items/s snapshots_created %v live_snapshots %v\n",
 		total, dur, float64(total)/float64(dur.Seconds()), db.getCurrSn(), len(db.GetSnapshots()))
 }
