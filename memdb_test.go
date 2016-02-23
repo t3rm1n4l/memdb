@@ -9,13 +9,19 @@ import "math/rand"
 import "sync"
 import "runtime"
 import "encoding/binary"
+import "flag"
+import "bytes"
 
 //import "github.com/t3rm1n4l/memdb/mm"
 
 var testConf Config
+var N, Sz *int
 
 func init() {
 	testConf = DefaultConfig()
+	N = flag.Int("n", 0, "total number of docs")
+	Sz = flag.Int("sz", 8, "Key size in multiples of 8 bytes")
+	flag.Parse()
 	//testConf.UseMemoryMgmt(mm.Malloc, mm.Free)
 }
 
@@ -72,9 +78,30 @@ func doInsert(db *MemDB, wg *sync.WaitGroup, n int, isRand bool, shouldSnap bool
 			s, _ := w.NewSnapshot()
 			s.Close()
 		}
-		buf := make([]byte, 8)
-		binary.BigEndian.PutUint64(buf, uint64(val))
+		buf := make([]byte, *Sz)
+		for i := 0; i < *Sz/8; i++ {
+			binary.LittleEndian.PutUint64(buf[i*8:i*8+8], uint64(val))
+		}
 		w.Put(buf)
+	}
+}
+
+var load [][8]byte
+
+func doPrealloc(n int) {
+	load = make([][8]byte, n)
+	rnd := rand.New(rand.NewSource(int64(rand.Int())))
+	for i := 0; i < n; i++ {
+		val := rnd.Int()
+		binary.BigEndian.PutUint64(load[i][:], uint64(val))
+	}
+}
+
+func doInsert2(db *MemDB, wg *sync.WaitGroup, start int, end int, shouldSnap bool) {
+	defer wg.Done()
+	w := db.NewWriter()
+	for ; start < end; start++ {
+		w.Put(load[start][:])
 	}
 }
 
@@ -83,16 +110,21 @@ func TestInsertPerf(t *testing.T) {
 	db := NewWithConfig(testConf)
 	defer db.Close()
 	n := 1000000
+	if *N != 0 {
+		n = *N / runtime.GOMAXPROCS(0)
+	}
+
+	//doPrealloc(*N)
 	t0 := time.Now()
 	total := n * runtime.GOMAXPROCS(0)
 	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
 		wg.Add(1)
 		go doInsert(db, &wg, n, true, true)
+		//go doInsert2(db, &wg, i*n, i*n+n, true)
 	}
 	wg.Wait()
 
 	snap, _ := db.NewSnapshot()
-
 	dur := time.Since(t0)
 	VerifyCount(snap, n*runtime.GOMAXPROCS(0), t)
 	fmt.Printf("%d items took %v -> %v items/s snapshots_created %v live_snapshots %v\n",
@@ -111,6 +143,27 @@ func doGet(t *testing.T, db *MemDB, snap *Snapshot, wg *sync.WaitGroup, n int) {
 		itr.Seek(buf)
 		if !itr.Valid() {
 			t.Errorf("Expected to find %v", val)
+		}
+	}
+}
+
+func doRange(t *testing.T, db *MemDB, snap *Snapshot, wg *sync.WaitGroup, n int, size int) {
+	defer wg.Done()
+	rnd := rand.New(rand.NewSource(int64(rand.Int())))
+
+	buf := make([]byte, 8)
+	itr := db.NewIterator(snap)
+	for i := 0; i < n; i++ {
+		val := rnd.Int() % n
+		end := val + size
+		binary.BigEndian.PutUint64(buf, uint64(val))
+		itr.Seek(buf)
+		if !itr.Valid() {
+			t.Errorf("Expected to find %v", val)
+		}
+		binary.BigEndian.PutUint64(buf, uint64(end))
+
+		for ; itr.Valid() && bytes.Compare(itr.Get(), buf) < 0; itr.Next() {
 		}
 	}
 }
@@ -171,6 +224,9 @@ func TestGetPerf(t *testing.T) {
 	db := NewWithConfig(testConf)
 	defer db.Close()
 	n := 1000000
+	if *N != 0 {
+		n = *N / runtime.GOMAXPROCS(0)
+	}
 	wg.Add(1)
 	go doInsert(db, &wg, n, false, true)
 	wg.Wait()
@@ -182,6 +238,64 @@ func TestGetPerf(t *testing.T) {
 	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
 		wg.Add(1)
 		go doGet(t, db, snap, &wg, n)
+	}
+	wg.Wait()
+	dur := time.Since(t0)
+	fmt.Printf("%d items took %v -> %v items/s\n", total, dur, float64(total)/float64(dur.Seconds()))
+}
+
+func TestGetBGPerf(t *testing.T) {
+	var wg sync.WaitGroup
+	var wg2 sync.WaitGroup
+	db := NewWithConfig(testConf)
+	defer db.Close()
+	n := 1000000
+	if *N != 0 {
+		n = *N / runtime.GOMAXPROCS(0)
+	}
+	wg.Add(1)
+	go doInsert(db, &wg, n, false, true)
+	wg.Wait()
+	snap, _ := db.NewSnapshot()
+
+	go func() {
+		for i := 0; i < runtime.GOMAXPROCS(0); i++ {
+			wg2.Add(1)
+			go doReplace(&wg2, t, db.NewWriter(), i*n, i*n+n, true)
+		}
+	}()
+
+	t0 := time.Now()
+	total := n * runtime.GOMAXPROCS(0)
+	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
+		wg.Add(1)
+		go doGet(t, db, snap, &wg, n)
+	}
+	wg.Wait()
+	dur := time.Since(t0)
+	fmt.Printf("%d items took %v -> %v items/s\n", total, dur, float64(total)/float64(dur.Seconds()))
+	//wg2.Wait()
+}
+
+func TestRangePerf(t *testing.T) {
+	var wg sync.WaitGroup
+	db := NewWithConfig(testConf)
+	defer db.Close()
+	n := 1000000
+	if *N != 0 {
+		n = *N / runtime.GOMAXPROCS(0)
+	}
+	wg.Add(1)
+	go doInsert(db, &wg, n, false, true)
+	wg.Wait()
+	snap, _ := db.NewSnapshot()
+	VerifyCount(snap, n, t)
+
+	t0 := time.Now()
+	total := n * runtime.GOMAXPROCS(0)
+	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
+		wg.Add(1)
+		go doRange(t, db, snap, &wg, n, 10000)
 	}
 	wg.Wait()
 	dur := time.Since(t0)
@@ -319,12 +433,20 @@ func TestDelete(t *testing.T) {
 	fmt.Println(db.DumpStats())
 }
 
-func doReplace(wg *sync.WaitGroup, t *testing.T, w *Writer, start, end int) {
+func doReplace(wg *sync.WaitGroup, t *testing.T, w *Writer, start, end int, shouldSnap bool) {
 	defer wg.Done()
+
+	var snap *Snapshot
 
 	for ; start < end; start++ {
 		w.Delete([]byte(fmt.Sprintf("%010d", start)))
 		w.Put([]byte(fmt.Sprintf("%010d", start)))
+		if shouldSnap && start%10000 == 0 {
+			if snap != nil {
+				snap.Close()
+			}
+			snap, _ = w.NewSnapshot()
+		}
 	}
 }
 
@@ -348,7 +470,7 @@ func TestGCPerf(t *testing.T) {
 	for x := 0; x < iterations; x++ {
 		for i := 0; i < nW; i++ {
 			wg.Add(1)
-			go doReplace(&wg, t, ws[i], i*perW, i*perW+perW)
+			go doReplace(&wg, t, ws[i], i*perW, i*perW+perW, false)
 		}
 		wg.Wait()
 		curr, _ := db.NewSnapshot()
