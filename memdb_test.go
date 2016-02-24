@@ -16,11 +16,13 @@ import "bytes"
 
 var testConf Config
 var N, Sz *int
+var RangeSz *int
 
 func init() {
 	testConf = DefaultConfig()
 	N = flag.Int("n", 0, "total number of docs")
 	Sz = flag.Int("sz", 8, "Key size in multiples of 8 bytes")
+	RangeSz = flag.Int("rangesz", 10000, "Range size")
 	flag.Parse()
 	//testConf.UseMemoryMgmt(mm.Malloc, mm.Free)
 }
@@ -66,6 +68,7 @@ func TestInsert(t *testing.T) {
 func doInsert(db *MemDB, wg *sync.WaitGroup, n int, isRand bool, shouldSnap bool) {
 	defer wg.Done()
 	w := db.NewWriter()
+	buf := make([]byte, *Sz)
 	rnd := rand.New(rand.NewSource(int64(rand.Int())))
 	for i := 0; i < n; i++ {
 		var val int
@@ -78,9 +81,8 @@ func doInsert(db *MemDB, wg *sync.WaitGroup, n int, isRand bool, shouldSnap bool
 			s, _ := w.NewSnapshot()
 			s.Close()
 		}
-		buf := make([]byte, *Sz)
-		for i := 0; i < *Sz/8; i++ {
-			binary.LittleEndian.PutUint64(buf[i*8:i*8+8], uint64(val))
+		for x := 0; x < *Sz/8; x++ {
+			binary.BigEndian.PutUint64(buf[x*8:x*8+8], uint64(val))
 		}
 		w.Put(buf)
 	}
@@ -128,7 +130,7 @@ func TestInsertPerf(t *testing.T) {
 	dur := time.Since(t0)
 	VerifyCount(snap, n*runtime.GOMAXPROCS(0), t)
 	fmt.Printf("%d items took %v -> %v items/s snapshots_created %v live_snapshots %v\n",
-		total, dur, float64(total)/float64(dur.Seconds()), db.getCurrSn(), len(db.GetSnapshots()))
+		total, dur, int(float64(total)/float64(dur.Seconds())), db.getCurrSn(), len(db.GetSnapshots()))
 }
 
 func doGet(t *testing.T, db *MemDB, snap *Snapshot, wg *sync.WaitGroup, n int) {
@@ -140,8 +142,8 @@ func doGet(t *testing.T, db *MemDB, snap *Snapshot, wg *sync.WaitGroup, n int) {
 	for i := 0; i < n; i++ {
 		val := rnd.Int() % n
 
-		for i := 0; i < *Sz/8; i++ {
-			binary.LittleEndian.PutUint64(buf[i*8:i*8+8], uint64(val))
+		for x := 0; x < *Sz/8; x++ {
+			binary.BigEndian.PutUint64(buf[x*8:x*8+8], uint64(val))
 		}
 		itr.Seek(buf)
 		if !itr.Valid() {
@@ -161,14 +163,14 @@ func doRange(t *testing.T, db *MemDB, snap *Snapshot, wg *sync.WaitGroup, n int,
 		end := val + size
 
 		for i := 0; i < *Sz/8; i++ {
-			binary.LittleEndian.PutUint64(buf[i*8:i*8+8], uint64(val))
+			binary.BigEndian.PutUint64(buf[i*8:i*8+8], uint64(val))
 		}
 		itr.Seek(buf)
 		if !itr.Valid() {
 			t.Errorf("Expected to find %v", val)
 		}
 		for i := 0; i < *Sz/8; i++ {
-			binary.LittleEndian.PutUint64(buf[i*8:i*8+8], uint64(end))
+			binary.BigEndian.PutUint64(buf[i*8:i*8+8], uint64(end))
 		}
 
 		for ; itr.Valid() && bytes.Compare(itr.Get(), buf) < 0; itr.Next() {
@@ -249,7 +251,7 @@ func TestGetPerf(t *testing.T) {
 	}
 	wg.Wait()
 	dur := time.Since(t0)
-	fmt.Printf("%d items took %v -> %v items/s\n", total, dur, float64(total)/float64(dur.Seconds()))
+	fmt.Printf("%d items took %v -> %v items/s\n", total, dur, int(float64(total)/float64(dur.Seconds())))
 }
 
 func TestGetBGPerf(t *testing.T) {
@@ -281,7 +283,7 @@ func TestGetBGPerf(t *testing.T) {
 	}
 	wg.Wait()
 	dur := time.Since(t0)
-	fmt.Printf("%d items took %v -> %v items/s\n", total, dur, float64(total)/float64(dur.Seconds()))
+	fmt.Printf("%d items took %v -> %v items/s\n", total, dur, (float64(total) / float64(dur.Seconds())))
 	//wg2.Wait()
 }
 
@@ -303,11 +305,11 @@ func TestRangePerf(t *testing.T) {
 	total := n * runtime.GOMAXPROCS(0)
 	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
 		wg.Add(1)
-		go doRange(t, db, snap, &wg, n, 10000)
+		go doRange(t, db, snap, &wg, n, *RangeSz)
 	}
 	wg.Wait()
 	dur := time.Since(t0)
-	fmt.Printf("%d items took %v -> %v items/s\n", total, dur, float64(total)/float64(dur.Seconds()))
+	fmt.Printf("%d items took %v -> %v items/s\n", total, dur, (float64(total) / float64(dur.Seconds())))
 }
 
 func VerifyCount(snap *Snapshot, n int, t *testing.T) {
