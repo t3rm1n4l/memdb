@@ -135,11 +135,14 @@ func doGet(t *testing.T, db *MemDB, snap *Snapshot, wg *sync.WaitGroup, n int) {
 	defer wg.Done()
 	rnd := rand.New(rand.NewSource(int64(rand.Int())))
 
-	buf := make([]byte, 8)
+	buf := make([]byte, *Sz)
 	itr := db.NewIterator(snap)
 	for i := 0; i < n; i++ {
 		val := rnd.Int() % n
-		binary.BigEndian.PutUint64(buf, uint64(val))
+
+		for i := 0; i < *Sz/8; i++ {
+			binary.LittleEndian.PutUint64(buf[i*8:i*8+8], uint64(val))
+		}
 		itr.Seek(buf)
 		if !itr.Valid() {
 			t.Errorf("Expected to find %v", val)
@@ -151,17 +154,22 @@ func doRange(t *testing.T, db *MemDB, snap *Snapshot, wg *sync.WaitGroup, n int,
 	defer wg.Done()
 	rnd := rand.New(rand.NewSource(int64(rand.Int())))
 
-	buf := make([]byte, 8)
+	buf := make([]byte, *Sz)
 	itr := db.NewIterator(snap)
 	for i := 0; i < n; i++ {
 		val := rnd.Int() % n
 		end := val + size
-		binary.BigEndian.PutUint64(buf, uint64(val))
+
+		for i := 0; i < *Sz/8; i++ {
+			binary.LittleEndian.PutUint64(buf[i*8:i*8+8], uint64(val))
+		}
 		itr.Seek(buf)
 		if !itr.Valid() {
 			t.Errorf("Expected to find %v", val)
 		}
-		binary.BigEndian.PutUint64(buf, uint64(end))
+		for i := 0; i < *Sz/8; i++ {
+			binary.LittleEndian.PutUint64(buf[i*8:i*8+8], uint64(end))
+		}
 
 		for ; itr.Valid() && bytes.Compare(itr.Get(), buf) < 0; itr.Next() {
 		}
