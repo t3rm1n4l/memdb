@@ -12,19 +12,21 @@ import "encoding/binary"
 import "flag"
 import "bytes"
 
-//import "github.com/t3rm1n4l/memdb/mm"
+import "github.com/t3rm1n4l/memdb/mm"
 
 var testConf Config
 var N, Sz *int
 var RangeSz *int
+var Partns *int
 
 func init() {
 	testConf = DefaultConfig()
 	N = flag.Int("n", 0, "total number of docs")
 	Sz = flag.Int("sz", 8, "Key size in multiples of 8 bytes")
 	RangeSz = flag.Int("rangesz", 10000, "Range size")
+	Partns = flag.Int("partns", 1, "Partitions")
 	flag.Parse()
-	//testConf.UseMemoryMgmt(mm.Malloc, mm.Free)
+	testConf.UseMemoryMgmt(mm.Malloc, mm.Free)
 }
 
 func TestInsert(t *testing.T) {
@@ -108,29 +110,43 @@ func doInsert2(db *MemDB, wg *sync.WaitGroup, start int, end int, shouldSnap boo
 }
 
 func TestInsertPerf(t *testing.T) {
-	var wg sync.WaitGroup
-	db := NewWithConfig(testConf)
-	defer db.Close()
-	n := 1000000
-	if *N != 0 {
-		n = *N / runtime.GOMAXPROCS(0)
+
+	var gwg sync.WaitGroup
+
+	runInst := func(gwg *sync.WaitGroup, n int, threads int) {
+		defer gwg.Done()
+
+		var wg sync.WaitGroup
+		db := NewWithConfig(testConf)
+		defer db.Close()
+
+		if threads == 0 {
+			threads = 1
+		}
+
+		//doPrealloc(*N)
+		for i := 0; i < threads; i++ {
+			wg.Add(1)
+			go doInsert(db, &wg, n, true, true)
+			//go doInsert2(db, &wg, i*n, i*n+n, true)
+		}
+		wg.Wait()
+
+		db.NewSnapshot()
 	}
 
-	//doPrealloc(*N)
+	n := *N / *Partns
+	perg := runtime.GOMAXPROCS(0) / *Partns
+	nperg := n / perg
+
 	t0 := time.Now()
-	total := n * runtime.GOMAXPROCS(0)
-	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
-		wg.Add(1)
-		go doInsert(db, &wg, n, true, true)
-		//go doInsert2(db, &wg, i*n, i*n+n, true)
+	for x := 0; x < *Partns; x++ {
+		gwg.Add(1)
+		go runInst(&gwg, nperg, perg)
 	}
-	wg.Wait()
-
-	snap, _ := db.NewSnapshot()
+	gwg.Wait()
 	dur := time.Since(t0)
-	VerifyCount(snap, n*runtime.GOMAXPROCS(0), t)
-	fmt.Printf("%d items took %v -> %v items/s snapshots_created %v live_snapshots %v\n",
-		total, dur, int(float64(total)/float64(dur.Seconds())), db.getCurrSn(), len(db.GetSnapshots()))
+	fmt.Printf("throughput %d\n", int(float64(*Partns*perg*nperg)/float64(dur.Seconds())))
 }
 
 func doGet(t *testing.T, db *MemDB, snap *Snapshot, wg *sync.WaitGroup, n int) {
@@ -334,7 +350,7 @@ func TestLoadStoreDisk(t *testing.T) {
 	var wg sync.WaitGroup
 	db := NewWithConfig(testConf)
 	defer db.Close()
-	n := 1000000
+	n := 50000000
 	t0 := time.Now()
 	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
 		wg.Add(1)
