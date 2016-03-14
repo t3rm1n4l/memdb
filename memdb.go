@@ -192,7 +192,7 @@ func (w *Writer) Put2(bs []byte) (n *skiplist.Node) {
 	n, success = w.store.Insert2(unsafe.Pointer(x), w.insCmp, w.existCmp, w.buf,
 		w.rand.Float32, w.slSts1)
 	if success {
-		atomic.AddInt64(&w.count, 1)
+		w.count += 1
 	} else {
 		w.freeItem(x)
 	}
@@ -230,7 +230,7 @@ func (w *Writer) Delete2(bs []byte) (n *skiplist.Node, success bool) {
 func (w *Writer) DeleteNode(x *skiplist.Node) (success bool) {
 	defer func() {
 		if success {
-			atomic.AddInt64(&w.count, -1)
+			w.count -= 1
 		}
 	}()
 

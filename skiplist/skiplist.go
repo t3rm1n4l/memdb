@@ -98,7 +98,7 @@ func (s *Skiplist) GetAccesBarrier() *AccessBarrier {
 
 func (s *Skiplist) FreeNode(n *Node, sts *Stats) {
 	s.freeNode(n)
-	atomic.AddInt64(&sts.nodeFrees, 1)
+	sts.nodeFrees += 1
 }
 
 type ActionBuffer struct {
@@ -145,9 +145,9 @@ func (s *Skiplist) NewLevel(randFn func() float32) int {
 func (s *Skiplist) helpDelete(level int, prev, curr, next *Node, sts *Stats) bool {
 	success := prev.dcasNext(level, curr, next, false, false)
 	if success && level == curr.Level() {
-		atomic.AddInt64(&sts.softDeletes, -1)
-		atomic.AddInt64(&sts.levelNodesCount[level], -1)
-		atomic.AddInt64(&sts.usedBytes, -int64(s.Size(curr)))
+		sts.softDeletes -= 1
+		sts.levelNodesCount[level] -= 1
+		sts.usedBytes -= int64(s.Size(curr))
 	}
 	return success
 }
@@ -166,7 +166,7 @@ retry:
 			next, deleted := curr.getNext(i)
 			for deleted {
 				if !s.helpDelete(i, prev, curr, next, sts) {
-					atomic.AddUint64(&sts.readConflicts, 1)
+					sts.readConflicts += 1
 					goto retry
 				}
 
@@ -227,7 +227,7 @@ retry:
 
 	x.setNext(0, buf.succs[0], false)
 	if !buf.preds[0].dcasNext(0, buf.succs[0], x, false, false) {
-		atomic.AddUint64(&sts.insertConflicts, 1)
+		sts.insertConflicts += 1
 		goto retry
 	}
 
@@ -242,9 +242,9 @@ retry:
 		}
 	}
 
-	atomic.AddInt64(&sts.nodeAllocs, 1)
-	atomic.AddInt64(&sts.levelNodesCount[itemLevel], 1)
-	atomic.AddInt64(&sts.usedBytes, int64(s.Size(x)))
+	sts.nodeAllocs += 1
+	sts.levelNodesCount[itemLevel] += 1
+	sts.usedBytes += int64(s.Size(x))
 	return x, true
 }
 
@@ -261,7 +261,7 @@ func (s *Skiplist) softDelete(delNode *Node, sts *Stats) bool {
 	}
 
 	if deleteMarked {
-		atomic.AddInt64(&sts.softDeletes, 1)
+		sts.softDeletes += 1
 	}
 
 	return deleteMarked
