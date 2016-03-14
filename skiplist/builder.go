@@ -13,6 +13,8 @@ type Segment struct {
 	rand    *rand.Rand
 	callb   NodeCallback
 	count   uint64
+
+	sts *Stats
 }
 
 func (s *Segment) SetNodeCallback(fn NodeCallback) {
@@ -22,9 +24,9 @@ func (s *Segment) SetNodeCallback(fn NodeCallback) {
 func (s *Segment) Add(itm unsafe.Pointer) {
 	itemLevel := s.builder.store.NewLevel(s.rand.Float32)
 	x := s.builder.store.newNode(itm, itemLevel)
-	atomic.AddInt64(&s.builder.store.stats.nodeAllocs, 1)
-	atomic.AddInt64(&s.builder.store.stats.levelNodesCount[itemLevel], 1)
-	atomic.AddInt64(&s.builder.store.usedBytes, int64(s.builder.store.Size(x)))
+	atomic.AddInt64(&s.sts.nodeAllocs, 1)
+	atomic.AddInt64(&s.sts.levelNodesCount[itemLevel], 1)
+	atomic.AddInt64(&s.sts.usedBytes, int64(s.builder.store.Size(x)))
 
 	for l := 0; l <= itemLevel; l++ {
 		if s.tail[l] != nil {
@@ -53,6 +55,7 @@ func (b *Builder) NewSegment() *Segment {
 	return &Segment{tail: make([]*Node, MaxLevel+1),
 		head: make([]*Node, MaxLevel+1), builder: b,
 		rand: rand.New(rand.NewSource(int64(rand.Int()))),
+		sts:  new(Stats),
 	}
 }
 
@@ -81,6 +84,10 @@ func (b *Builder) Assemble(segments ...*Segment) *Skiplist {
 		if tail[l] != nil {
 			tail[l].setNext(l, b.store.tail, false)
 		}
+	}
+
+	for _, seg := range segments {
+		b.store.Stats.Merge(seg.sts)
 	}
 
 	return b.store
