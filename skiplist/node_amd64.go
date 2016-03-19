@@ -15,8 +15,9 @@ import (
 //                                  +----------------------+--------------+--------------+--------------+
 
 var nodeHdrSize = unsafe.Sizeof(struct {
-	itm    unsafe.Pointer
-	GClink *Node
+	itm     unsafe.Pointer
+	GClink  *Node
+	DataPtr uint64
 }{})
 
 var nodeRefSize = unsafe.Sizeof(NodeRef{})
@@ -26,9 +27,10 @@ var nodeRefFlagSize = unsafe.Sizeof(NodeRef{}.flag)
 const deletedFlag = 0xff
 
 type Node struct {
-	itm    unsafe.Pointer
-	GClink *Node
-	level  uint16
+	itm     unsafe.Pointer
+	GClink  *Node
+	DataPtr uint64
+	level   uint16
 }
 
 func (n Node) Level() int {
