@@ -157,10 +157,6 @@ type Writer struct {
 	resSts                 restoreStats
 	count                  int64
 
-	fd     *os.File
-	rfd    *os.File
-	offset int
-
 	*MemDB
 }
 
@@ -280,6 +276,7 @@ type Config struct {
 	useDeltaFiles bool
 	mallocFun     skiplist.MallocFn
 	freeFun       skiplist.FreeFn
+	blockStoreDir string
 }
 
 func (cfg *Config) SetKeyComparator(cmp KeyCompare) {
@@ -466,8 +463,6 @@ func (m *MemDB) newWriter() *Writer {
 		buf:   m.store.MakeBuf(),
 		MemDB: m,
 	}
-	w.fd, _ = os.OpenFile("test.data", os.O_WRONLY|os.O_CREATE, 0755)
-	w.rfd, _ = os.Open("test.data")
 
 	w.slSts1.IsLocal(true)
 	w.slSts2.IsLocal(true)
