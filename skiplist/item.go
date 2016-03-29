@@ -7,16 +7,16 @@ import (
 )
 
 var (
-	minItem unsafe.Pointer
-	maxItem unsafe.Pointer = unsafe.Pointer(^uintptr(0))
+	MinItem unsafe.Pointer
+	MaxItem unsafe.Pointer = unsafe.Pointer(^uintptr(0))
 )
 
 func compare(cmp CompareFn, this, that unsafe.Pointer) int {
-	if this == minItem || that == maxItem {
+	if this == MinItem || that == MaxItem {
 		return -1
 	}
 
-	if this == maxItem || that == minItem {
+	if this == MaxItem || that == MinItem {
 		return 1
 	}
 
