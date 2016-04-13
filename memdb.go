@@ -83,6 +83,7 @@ func DefaultConfig() Config {
 	cfg.SetFileType(RawdbFile)
 	cfg.useMemoryMgmt = false
 	cfg.refreshRate = defaultRefreshRate
+	cfg.storageShards = 1
 	return cfg
 }
 
@@ -277,6 +278,7 @@ type Config struct {
 	mallocFun     skiplist.MallocFn
 	freeFun       skiplist.FreeFn
 	blockStoreDir string
+	storageShards int
 }
 
 func (cfg *Config) SetKeyComparator(cmp KeyCompare) {
@@ -333,6 +335,9 @@ type MemDB struct {
 	gcchan   chan *skiplist.Node
 	freechan chan *skiplist.Node
 
+	shardWrs []*diskWriter
+	bm       BlockManager
+
 	hasShutdown bool
 	shutdownWg1 sync.WaitGroup // GC workers and StoreToDisk task
 	shutdownWg2 sync.WaitGroup // Free workers
@@ -358,6 +363,18 @@ func NewWithConfig(cfg Config) *MemDB {
 	buf := dbInstances.MakeBuf()
 	defer dbInstances.FreeBuf(buf)
 	dbInstances.Insert(unsafe.Pointer(m), CompareMemDB, buf, &dbInstances.Stats)
+
+	if cfg.blockStoreDir != "" {
+		var err error
+		m.bm, err = newFileBlockManager(cfg.storageShards, cfg.blockStoreDir)
+		if err != nil {
+			panic(err)
+		}
+
+		for i := 0; i < cfg.storageShards; i++ {
+			m.shardWrs = append(m.shardWrs, m.newDiskWriter(i))
+		}
+	}
 
 	return m
 
@@ -636,6 +653,9 @@ func (m *MemDB) freeWorker(w *Writer) {
 			itm := (*Item)(dnode.Item())
 			m.freeItem(itm)
 			m.store.FreeNode(dnode, &w.slSts3)
+			if m.blockStoreDir != "" {
+				m.bm.DeleteBlock(blockPtr(n.DataPtr))
+			}
 		}
 
 		m.store.Stats.Merge(&w.slSts3)
