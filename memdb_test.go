@@ -11,13 +11,13 @@ import "sync"
 import "runtime"
 import "encoding/binary"
 
-//import "github.com/t3rm1n4l/memdb/mm"
+import "github.com/t3rm1n4l/memdb/mm"
 
 var testConf Config
 
 func init() {
 	testConf = DefaultConfig()
-	//testConf.UseMemoryMgmt(mm.Malloc, mm.Free)
+	testConf.UseMemoryMgmt(mm.Malloc, mm.Free)
 }
 
 func TestBatchOps(t *testing.T) {
@@ -25,16 +25,16 @@ func TestBatchOps(t *testing.T) {
 	db := NewWithConfig(testConf)
 	defer db.Close()
 
-	n := 1000000
+	n := 100000
 
 	var snap *Snapshot
 
-	for x := 0; x < 10; x++ {
+	for x := 0; x < 1000; x++ {
 
 		keys := make([]int, n)
 		ops := make([]ItemOp, n)
 		for i := 0; i < n; i++ {
-			keys[i] = rand.Int()
+			keys[i] = i
 		}
 
 		sort.Ints(keys)
@@ -48,6 +48,7 @@ func TestBatchOps(t *testing.T) {
 		if snap != nil {
 			snap.Close()
 		}
+		snap, _ = db.NewSnapshot()
 	}
 
 	snap, _ = db.NewSnapshot()
