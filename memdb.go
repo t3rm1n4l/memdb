@@ -300,6 +300,10 @@ func (cfg *Config) IgnoreItemSize() {
 	cfg.ignoreItemSize = true
 }
 
+func (cfg *Config) HasBlockStore() bool {
+	return cfg.blockStoreDir != ""
+}
+
 func (cfg *Config) UseMemoryMgmt(malloc skiplist.MallocFn, free skiplist.FreeFn) {
 	if runtime.GOARCH == "amd64" {
 		cfg.useMemoryMgmt = true
@@ -361,7 +365,7 @@ func NewWithConfig(cfg Config) *MemDB {
 	defer dbInstances.FreeBuf(buf)
 	dbInstances.Insert(unsafe.Pointer(m), CompareMemDB, buf, &dbInstances.Stats)
 
-	if cfg.blockStoreDir != "" {
+	if cfg.HasBlockStore() {
 		var err error
 		m.bm, err = newFileBlockManager(cfg.storageShards, cfg.blockStoreDir)
 		if err != nil {
@@ -641,7 +645,7 @@ func (m *MemDB) freeWorker(w *Writer) {
 			itm := (*Item)(n.Item())
 			m.freeItem(itm)
 			m.store.FreeNode(n, &w.slSts3)
-			if m.blockStoreDir != "" {
+			if m.HasBlockStore() {
 				m.bm.DeleteBlock(blockPtr(n.DataPtr))
 			}
 		}
