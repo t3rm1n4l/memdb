@@ -12,6 +12,10 @@ type Iterator struct {
 	snap *Snapshot
 	iter *skiplist.Iterator
 	buf  *skiplist.ActionBuffer
+
+	blockBuf  []byte
+	itms      [][]byte
+	itmOffset int
 }
 
 func (it *Iterator) skipUnwanted() {
@@ -27,15 +31,41 @@ loop:
 	}
 }
 
+func (it *Iterator) loadItems() {
+	if it.snap.db.HasBlockStore() {
+		n := it.GetNode()
+		if err := it.snap.db.bm.ReadBlock(blockPtr(n.DataPtr), it.blockBuf); err != nil {
+			panic(err)
+		}
+
+		it.itms = newDataBlock(it.blockBuf).GetItems()
+		it.itmOffset = 0
+	}
+}
+
+func (it *Iterator) seek(bs []byte) {
+	if it.snap.db.HasBlockStore() {
+		it.loadItems()
+		for ; it.snap.db.keyCmp(it.itms[it.itmOffset], bs) < 0; it.itmOffset++ {
+		}
+
+		if it.itmOffset == len(it.itms) {
+			it.Next()
+		}
+	}
+}
+
 func (it *Iterator) SeekFirst() {
 	it.iter.SeekFirst()
 	it.skipUnwanted()
+	it.loadItems()
 }
 
 func (it *Iterator) Seek(bs []byte) {
 	itm := it.snap.db.newItem(bs, false)
-	it.iter.Seek(unsafe.Pointer(itm))
+	it.iter.SeekPrev(unsafe.Pointer(itm))
 	it.skipUnwanted()
+	it.seek(bs)
 }
 
 func (it *Iterator) Valid() bool {
@@ -43,6 +73,9 @@ func (it *Iterator) Valid() bool {
 }
 
 func (it *Iterator) Get() []byte {
+	if it.snap.db.HasBlockStore() {
+		return it.itms[it.itmOffset]
+	}
 	return (*Item)(it.iter.Get()).Bytes()
 }
 
@@ -51,6 +84,11 @@ func (it *Iterator) GetNode() *skiplist.Node {
 }
 
 func (it *Iterator) Next() {
+	if len(it.itms) > 0 && it.itmOffset+1 < len(it.itms) {
+		it.itmOffset++
+		return
+	}
+
 	it.iter.Next()
 	it.count++
 	it.skipUnwanted()
@@ -58,6 +96,7 @@ func (it *Iterator) Next() {
 		it.Refresh()
 		it.count = 0
 	}
+	it.loadItems()
 }
 
 // Refresh can help safe-memory-reclaimer to free deleted objects
@@ -85,9 +124,15 @@ func (m *MemDB) NewIterator(snap *Snapshot) *Iterator {
 		return nil
 	}
 	buf := snap.db.store.MakeBuf()
-	return &Iterator{
+	it := &Iterator{
 		snap: snap,
 		iter: m.store.NewIterator(m.iterCmp, buf),
 		buf:  buf,
 	}
+
+	if snap.db.HasBlockStore() {
+		it.blockBuf = make([]byte, blockSize)
+	}
+
+	return it
 }
