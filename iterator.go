@@ -131,7 +131,7 @@ func (m *MemDB) NewIterator(snap *Snapshot) *Iterator {
 	}
 
 	if snap.db.HasBlockStore() {
-		it.blockBuf = make([]byte, blockSize)
+		it.blockBuf = make([]byte, blockSize, blockSize)
 	}
 
 	return it
