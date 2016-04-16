@@ -13,9 +13,10 @@ type Iterator struct {
 	iter *skiplist.Iterator
 	buf  *skiplist.ActionBuffer
 
-	blockBuf  []byte
-	itms      [][]byte
-	itmOffset int
+	blockBuf []byte
+
+	block dataBlock
+	curr  []byte
 }
 
 func (it *Iterator) skipUnwanted() {
@@ -38,18 +39,18 @@ func (it *Iterator) loadItems() {
 			panic(err)
 		}
 
-		it.itms = newDataBlock(it.blockBuf).GetItems()
-		it.itmOffset = 0
+		it.block = *newDataBlock(it.blockBuf)
+		it.curr = it.block.Get()
 	}
 }
 
 func (it *Iterator) seek(bs []byte) {
 	if it.snap.db.HasBlockStore() {
 		it.loadItems()
-		for ; it.snap.db.keyCmp(it.itms[it.itmOffset], bs) < 0; it.itmOffset++ {
+		for ; it.curr != nil && it.snap.db.keyCmp(it.curr, bs) < 0; it.curr = it.block.Get() {
 		}
 
-		if it.itmOffset == len(it.itms) {
+		if it.curr == nil {
 			it.Next()
 		}
 	}
@@ -74,7 +75,7 @@ func (it *Iterator) Valid() bool {
 
 func (it *Iterator) Get() []byte {
 	if it.snap.db.HasBlockStore() {
-		return it.itms[it.itmOffset]
+		return it.curr
 	}
 	return (*Item)(it.iter.Get()).Bytes()
 }
@@ -84,8 +85,7 @@ func (it *Iterator) GetNode() *skiplist.Node {
 }
 
 func (it *Iterator) Next() {
-	if len(it.itms) > 0 && it.itmOffset+1 < len(it.itms) {
-		it.itmOffset++
+	if it.curr = it.block.Get(); it.curr != nil {
 		return
 	}
 
